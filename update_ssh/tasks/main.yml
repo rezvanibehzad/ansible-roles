@@ -1,0 +1,54 @@
+- name: Get SSH version
+  command: ssh -V
+  register: ssh_version
+  ignore_errors: yes
+  changed_when: false
+- name: Check if SSH version is between 8.5 and 9.7
+  set_fact:
+    update_ssh: "{{ ssh_version.stderr.split(',')[0].split('_')[1].split('p')[0]|float >= 8.5 and ssh_version.stderr.split(',')[0].split('_')[1].split('p')[0]|float <= 9.7 }}"
+  when: ssh_version.stderr is defined
+
+- name: Print the result
+  debug:
+    msg: "{{ ssh_version.stderr.split(',')[0].split('_')[1].split('p')[0]}}"
+  when: ssh_version.stderr is defined
+
+- name: Update SSH to version 9.8
+  block:
+    - name: Update apt package list
+      apt:
+        update_cache: yes
+      become: yes
+    - name: Download OpenSSH 9.8
+      get_url:
+        url: https://cloudflare.cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-9.8p1.tar.gz
+        dest: /root/openssh-9.8p1.tar.gz
+    - name: Extract the downloaded file
+      unarchive:
+        src: /root/openssh-9.8p1.tar.gz
+        dest: /root
+        remote_src: yes
+    - name: Install build dependencies
+      apt:
+        name:
+          - build-essential
+          - zlib1g-dev
+          - libssl-dev
+        state: present
+    - name: Add execute permissions to configure
+      file:
+        path: /root/openssh-9.8p1/configure
+        mode: '0755'
+    - name: Build and install SSH
+      command:
+        cmd: "{{ item }}"
+        chdir: /root/openssh-9.8p1
+      loop:
+        - ./configure
+        - make
+        - make install
+    - name: Restart the SSH service
+      systemd:
+        name: ssh
+        state: restarted
+  when: update_ssh|bool
